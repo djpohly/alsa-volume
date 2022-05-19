@@ -9,7 +9,7 @@ $(EXE): $(SRC)
 clean:
 	rm -f $(EXE)
 
-install:
+install: $(EXE)
 	install -d $(DESTDIR)/usr/local/bin
 	install $(EXE) $(DESTDIR)/usr/local/bin
 
