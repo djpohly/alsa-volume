@@ -50,3 +50,8 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Cache and outputs
+.ccls-cache/
+.zig-cache/
+zig-out/
