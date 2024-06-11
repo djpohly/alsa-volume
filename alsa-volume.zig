@@ -23,9 +23,9 @@ const VolumeSpec = union(enum) {
     mute,
     unmute,
     toggle,
-    set: u7,
+    set: f64,
     set_raw: usize,
-    change: i8,
+    change: f64,
     change_raw: isize,
 };
 
@@ -37,10 +37,10 @@ fn get_device_spec(arg: []const u8) !DeviceSpec {
         return error.Usage;
 }
 
-fn parsePercent(str: []const u8) !u7 {
-    const value = try std.fmt.parseInt(u7, str, 10);
-    if (value > 100) return error.Overflow;
-    return value;
+fn parsePercent(str: []const u8) !f64 {
+    const value = try std.fmt.parseFloat(f64, str);
+    if (value < -100 or value > 100) return error.Overflow;
+    return value / 100;
 }
 
 fn get_volume_spec(arg: []const u8) !VolumeSpec {
@@ -52,8 +52,7 @@ fn get_volume_spec(arg: []const u8) !VolumeSpec {
         if (arg[arg.len - 1] == '%') {
             const percentStr = arg[0 .. arg.len - 1];
             return switch (percentStr[0]) {
-                '+' => .{ .change = parsePercent(percentStr[1..]) catch return error.Usage },
-                '-' => .{ .change = -@as(i8, parsePercent(percentStr[1..]) catch return error.Usage) },
+                '+', '-' => .{ .change = parsePercent(percentStr) catch return error.Usage },
                 else => .{ .set = parsePercent(percentStr) catch return error.Usage },
             };
         } else {
@@ -106,14 +105,15 @@ fn do_action(volume_spec: VolumeSpec, elem: MixerElement) !void {
         .mute => elem.setMuted(true),
         .unmute => elem.setMuted(false),
         .toggle => elem.setMuted(!try elem.isMuted()),
-        .set => |volume| elem.setVolumePercent(volume),
+        .set => |volume| elem.setVolumeFraction(volume),
         .set_raw => |raw| elem.setVolumeRaw(raw),
-        else => std.debug.panic("not implemented", .{}),
+        .change => |delta| elem.changeVolumeByFraction(delta),
+        .change_raw => |raw_delta| elem.changeVolumeByRaw(raw_delta),
     };
 
-    try stdout.print("{s} {d} {s}\n", .{
+    try stdout.print("{s} {d:.0} {s}\n", .{
         @tagName(elem),
-        try elem.getVolumePercent(),
+        try elem.getVolumeFraction() * 100,
         if (try elem.isMuted()) "off" else "on",
     });
 }

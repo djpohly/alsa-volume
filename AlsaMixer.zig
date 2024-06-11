@@ -69,6 +69,11 @@ pub const Element = union(enum) {
         right = alsa.SND_MIXER_SCHN_FRONT_RIGHT,
     };
 
+    const Range = struct {
+        min: usize,
+        size: usize,
+    };
+
     pub fn init(handle: *alsa.snd_mixer_elem_t) Element {
         return
             if (alsa.snd_mixer_selem_has_playback_switch(handle) != 0 and alsa.snd_mixer_selem_has_playback_volume(handle) != 0)
@@ -126,7 +131,7 @@ pub const Element = union(enum) {
         try self.setChannelMuted(.right, muted);
     }
 
-    pub fn getVolumeRange(self: Element) !std.meta.Tuple(&.{ usize, usize }) {
+    pub fn getVolumeRange(self: Element) !Range {
         const handle = self.getHandle();
         var min: c_long = undefined;
         var max: c_long = undefined;
@@ -136,7 +141,10 @@ pub const Element = union(enum) {
             .capture => alsa.snd_mixer_selem_get_capture_volume_range(handle, &min, &max),
         };
         try util.errorForRet(ret);
-        return .{ @intCast(min), @intCast(max) };
+
+        // range shouldn't be empty
+        assert(max > min);
+        return .{ .min = @intCast(min), .size = @intCast(max - min) };
     }
 
     pub fn getChannelVolumeRaw(self: Element, channel: Channel) !usize {
@@ -158,19 +166,18 @@ pub const Element = union(enum) {
         return @max(left, right);
     }
 
-    pub fn getVolumePercent(self: Element) !u7 {
-        const min, const max = try self.getVolumeRange();
-        assert(max > min);
-        const range: usize = max - min;
+    pub fn getVolumeFraction(self: Element) !f64 {
+        const range = try self.getVolumeRange();
 
         const raw = try self.getVolumeRaw();
-        assert(raw >= min and raw <= max);
+        assert(raw >= range.min);
 
-        const offset: usize = @intCast(raw - min);
-        assert(offset <= range);
+        const offset: usize = @intCast(raw - range.min);
+        assert(offset <= range.size);
 
-        const percent = (offset * 100 + (range / 2)) / range;
-        return @intCast(percent);
+        const f_offset: f64 = @floatFromInt(offset);
+        const f_range: f64 = @floatFromInt(range.size);
+        return f_offset / f_range;
     }
 
     pub fn setChannelVolumeRaw(self: Element, channel: Channel, raw: usize) !void {
@@ -189,12 +196,37 @@ pub const Element = union(enum) {
         try self.setChannelVolumeRaw(.right, raw);
     }
 
-    pub fn setVolumePercent(self: Element, percent: u7) !void {
-        const min, const max = try self.getVolumeRange();
-        assert(max > min);
-        const range: usize = @intCast(max - min);
+    pub fn setVolumeFraction(self: Element, value: f64) !void {
+        assert(value >= 0 and value <= 1);
 
-        const raw: usize = min + (percent * range + 50) / 100;
+        const range = try self.getVolumeRange();
+        const raw_float = @mulAdd(f64,
+            value,
+            @floatFromInt(range.size),
+            @floatFromInt(range.min),
+        );
+        const raw: usize = @intFromFloat(@round(raw_float));
         try self.setVolumeRaw(raw);
+    }
+
+    pub fn changeVolumeByRaw(self: Element, delta: isize) !void {
+        const range = try self.getVolumeRange();
+        const max = range.min + range.size;
+        const current = try self.getVolumeRaw();
+        const new =
+            if (delta < 0)
+                current -| @as(usize, @intCast(-delta))
+            else
+                current +| @as(usize, @intCast(delta));
+        try self.setVolumeRaw(std.math.clamp(new, range.min, max));
+    }
+
+    pub fn changeVolumeByFraction(self: Element, delta: f64) !void {
+        assert(delta >= -1 and delta <= 1);
+
+        const range = try self.getVolumeRange();
+        const f_range: f64 = @floatFromInt(range.size);
+        const raw_delta: isize = @intFromFloat(@round(delta * f_range));
+        try self.changeVolumeByRaw(raw_delta);
     }
 };
