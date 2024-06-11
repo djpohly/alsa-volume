@@ -23,8 +23,10 @@ const VolumeSpec = union(enum) {
     mute,
     unmute,
     toggle,
-    set: u8,
+    set: u7,
+    set_raw: usize,
     change: i8,
+    change_raw: isize,
 };
 
 fn get_device_spec(arg: []const u8) !DeviceSpec {
@@ -47,11 +49,20 @@ fn get_volume_spec(arg: []const u8) !VolumeSpec {
         if (std.mem.startsWith(u8, "mute", arg)) return .mute;
         if (std.mem.startsWith(u8, "unmute", arg)) return .unmute;
         if (std.mem.startsWith(u8, "toggle", arg)) return .toggle;
-        return switch (arg[0]) {
-            '+' => .{ .change = parsePercent(arg[1..]) catch return error.Usage },
-            '-' => .{ .change = -@as(i8, parsePercent(arg[1..]) catch return error.Usage) },
-            else => .{ .set = parsePercent(arg) catch return error.Usage },
-        };
+        if (arg[arg.len - 1] == '%') {
+            const percentStr = arg[0 .. arg.len - 1];
+            return switch (percentStr[0]) {
+                '+' => .{ .change = parsePercent(percentStr[1..]) catch return error.Usage },
+                '-' => .{ .change = -@as(i8, parsePercent(percentStr[1..]) catch return error.Usage) },
+                else => .{ .set = parsePercent(percentStr) catch return error.Usage },
+            };
+        } else {
+            return switch (arg[0]) {
+                '+' => .{ .change_raw = std.fmt.parseUnsigned(isize, arg[1..], 10) catch return error.Usage },
+                '-' => .{ .change_raw = -(std.fmt.parseUnsigned(isize, arg[1..], 10) catch return error.Usage) },
+                else => .{ .set_raw = std.fmt.parseUnsigned(usize, arg, 10) catch return error.Usage },
+            };
+        }
 }
 
 pub fn real_main() !void {
@@ -95,7 +106,9 @@ fn do_action(volume_spec: VolumeSpec, elem: MixerElement) !void {
         .mute => elem.setMuted(true),
         .unmute => elem.setMuted(false),
         .toggle => elem.setMuted(!try elem.isMuted()),
-        else => @panic("not implemented"),
+        .set => |volume| elem.setVolumePercent(volume),
+        .set_raw => |raw| elem.setVolumeRaw(raw),
+        else => std.debug.panic("not implemented", .{}),
     };
 
     try stdout.print("{s} {d} {s}\n", .{
@@ -108,7 +121,12 @@ fn do_action(volume_spec: VolumeSpec, elem: MixerElement) !void {
 pub fn main() u8 {
     real_main() catch |err| switch (err) {
         error.Usage => {
-            stderr.print("usage: {s} [p[layback]|c[apture]|b[oth] [g[et]|m[ute]|u[nmute]|t[oggle]|[+|-]0-100]]\n", .{ std.os.argv[0] }) catch {};
+            stderr.print(
+                \\usage: {s} [p[layback]|c[apture]|b[oth] [g[et]|m[ute]|u[nmute]|t[oggle]|[+|-]LEVEL]
+                \\   where LEVEL is either a raw value, or a percentage followed by '%'
+                \\
+                ,
+                .{ std.os.argv[0] }) catch {};
             return 1;
         },
         else => {

@@ -126,7 +126,7 @@ pub const Element = union(enum) {
         try self.setChannelMuted(.right, muted);
     }
 
-    pub fn getVolumeRange(self: Element) !std.meta.Tuple(&.{ isize, isize }) {
+    pub fn getVolumeRange(self: Element) !std.meta.Tuple(&.{ usize, usize }) {
         const handle = self.getHandle();
         var min: c_long = undefined;
         var max: c_long = undefined;
@@ -136,10 +136,10 @@ pub const Element = union(enum) {
             .capture => alsa.snd_mixer_selem_get_capture_volume_range(handle, &min, &max),
         };
         try util.errorForRet(ret);
-        return .{ min, max };
+        return .{ @intCast(min), @intCast(max) };
     }
 
-    pub fn getChannelVolumeRaw(self: Element, channel: Channel) !isize {
+    pub fn getChannelVolumeRaw(self: Element, channel: Channel) !usize {
         const handle = self.getHandle();
         const ch = @intFromEnum(channel);
         var vol: c_long = undefined;
@@ -149,10 +149,10 @@ pub const Element = union(enum) {
             .capture => alsa.snd_mixer_selem_get_capture_volume(handle, ch, &vol),
         };
         try util.errorForRet(ret);
-        return vol;
+        return @intCast(vol);
     }
 
-    pub fn getVolumeRaw(self: Element) !isize {
+    pub fn getVolumeRaw(self: Element) !usize {
         const left = try self.getChannelVolumeRaw(.left);
         const right = try self.getChannelVolumeRaw(.right);
         return @max(left, right);
@@ -160,13 +160,41 @@ pub const Element = union(enum) {
 
     pub fn getVolumePercent(self: Element) !u7 {
         const min, const max = try self.getVolumeRange();
-        const raw = try self.getVolumeRaw();
         assert(max > min);
-        const range: usize = @intCast(max - min);
+        const range: usize = max - min;
+
+        const raw = try self.getVolumeRaw();
         assert(raw >= min and raw <= max);
+
         const offset: usize = @intCast(raw - min);
         assert(offset <= range);
+
         const percent = (offset * 100 + (range / 2)) / range;
         return @intCast(percent);
+    }
+
+    pub fn setChannelVolumeRaw(self: Element, channel: Channel, raw: usize) !void {
+        const handle = self.getHandle();
+        const ch = @intFromEnum(channel);
+        const ret = switch (self) {
+            .none => unreachable,
+            .playback => alsa.snd_mixer_selem_set_playback_volume(handle, ch, @intCast(raw)),
+            .capture => alsa.snd_mixer_selem_set_capture_volume(handle, ch, @intCast(raw)),
+        };
+        try util.errorForRet(ret);
+    }
+
+    pub fn setVolumeRaw(self: Element, raw: usize) !void {
+        try self.setChannelVolumeRaw(.left, raw);
+        try self.setChannelVolumeRaw(.right, raw);
+    }
+
+    pub fn setVolumePercent(self: Element, percent: u7) !void {
+        const min, const max = try self.getVolumeRange();
+        assert(max > min);
+        const range: usize = @intCast(max - min);
+
+        const raw: usize = min + (percent * range + 50) / 100;
+        try self.setVolumeRaw(raw);
     }
 };
