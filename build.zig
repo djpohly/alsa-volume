@@ -23,10 +23,6 @@ pub fn build(b: *std.Build) void {
         .use_llvm = optimize != .Debug,
         .use_lld = optimize != .Debug,
     });
-
-    // exe.addCSourceFile(.{
-    //     .file = b.path("alsa-volume.c"),
-    // });
     exe.linkLibC();
     exe.linkSystemLibrary("alsa");
 
