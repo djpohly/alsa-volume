@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const stdout = std.io.getStdOut().writer();
 const stderr = std.io.getStdErr().writer();
 const AlsaMixer = @import("AlsaMixer.zig");
 const MixerElement = AlsaMixer.Element;
@@ -96,6 +97,12 @@ fn do_action(volume_spec: VolumeSpec, elem: MixerElement) !void {
         .toggle => elem.setMuted(!try elem.isMuted()),
         else => @panic("not implemented"),
     };
+
+    try stdout.print("{s} {d} {s}\n", .{
+        @tagName(elem),
+        try elem.getVolumePercent(),
+        if (try elem.isMuted()) "off" else "on",
+    });
 }
 
 pub fn main() u8 {
